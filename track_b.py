@@ -150,13 +150,18 @@ def plot_training_progress(history: Dict, output_path: str):
     axes[1, 0].set_title('Batch Loss (with moving average)')
     axes[1, 0].grid(True, alpha=0.3)
 
-    # 4. Loss Improvement
-    axes[1, 1].bar(['Initial', 'Final'],
-                   [history['train_loss'][0], history['train_loss'][-1]],
-                   color=['red', 'green'])
+    # 4. Loss Progress Throughout Epochs
+    axes[1, 1].plot(history['epoch'], history['train_loss'], 'b-o',
+                    label='Train Loss', linewidth=2, markersize=6)
+    axes[1, 1].plot(history['epoch'], history['test_loss'], 'r-o',
+                    label='Test Loss', linewidth=2, markersize=6)
+    axes[1, 1].fill_between(history['epoch'], history['train_loss'],
+                            alpha=0.3, color='blue')
+    axes[1, 1].set_xlabel('Epoch')
     axes[1, 1].set_ylabel('Loss')
-    axes[1, 1].set_title('Loss Improvement')
-    axes[1, 1].grid(True, alpha=0.3, axis='y')
+    axes[1, 1].set_title('Loss Improvement Over Epochs')
+    axes[1, 1].legend()
+    axes[1, 1].grid(True, alpha=0.3)
 
     plt.tight_layout()
     plot_file = output_dir / "training_progress.png"
@@ -512,16 +517,16 @@ def main():
 
     # Fine-tuning parameters - CPU optimized
     # ENHANCED Fine-tuning parameters
-    TRAIN_TEST_SPLIT = 0.2  # 80% train, 20% test - more data for learning
-    EPOCHS = 15  # 3x more epochs for deeper learning
-    BATCH_SIZE = 16  # Larger batches if you have RAM (use 12 if OOM)
-    LEARNING_RATE = 5e-5  # Higher initial LR for faster convergence
-    MARGIN = 0.3
-    # TRAIN_TEST_SPLIT = 0.2  # 80% train, 20% test
-    # EPOCHS = 1
-    # BATCH_SIZE = 8  # Reduced for CPU efficiency
-    # LEARNING_RATE = 2e-5
-    # MARGIN = 0.5
+    # TRAIN_TEST_SPLIT = 0.2  # 80% train, 20% test - more data for learning
+    # EPOCHS = 15  # 3x more epochs for deeper learning
+    # BATCH_SIZE = 16  # Larger batches if you have RAM (use 12 if OOM)
+    # LEARNING_RATE = 5e-5  # Higher initial LR for faster convergence
+    # MARGIN = 0.3
+    TRAIN_TEST_SPLIT = 0.2  # 80% train, 20% test
+    EPOCHS = 3
+    BATCH_SIZE = 8  # Reduced for CPU efficiency
+    LEARNING_RATE = 2e-5
+    MARGIN = 0.5
 
     # Evaluation parameters
     USE_E5_FORMAT = "e5" in MODEL_NAME.lower()
