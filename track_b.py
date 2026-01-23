@@ -123,11 +123,19 @@ def plot_training_progress(history: Dict, output_path: str):
     fig.suptitle('Training Progress', fontsize=16, fontweight='bold')
 
     # 1. Train vs Test Loss
-    axes[0, 0].plot(history['epoch'], history['train_loss'], 'b-o', label='Train Loss')
-    axes[0, 0].plot(history['epoch'], history['test_loss'], 'r-o', label='Test Loss')
+    # 4. Loss Margin (Difference between Train and Test Loss)
+    loss_gap = [test - train for test, train in zip(history['test_loss'], history['train_loss'])]
+    axes[0, 0].plot(history['epoch'], loss_gap, 'purple', marker='o', linewidth=2, markersize=6)
+    axes[0, 0].axhline(y=0, color='black', linestyle='--', alpha=0.5)
+    axes[0, 0].fill_between(history['epoch'], 0, loss_gap,
+                            where=[gap > 0 for gap in loss_gap],
+                            alpha=0.3, color='red', label='Overfitting')
+    axes[0, 0].fill_between(history['epoch'], 0, loss_gap,
+                            where=[gap <= 0 for gap in loss_gap],
+                            alpha=0.3, color='green', label='Underfitting')
     axes[0, 0].set_xlabel('Epoch')
-    axes[0, 0].set_ylabel('Loss')
-    axes[0, 0].set_title('Train vs Test Loss')
+    axes[0, 0].set_ylabel('Test Loss - Train Loss')
+    axes[0, 0].set_title('Overfitting Monitor (Generalization Gap)')
     axes[0, 0].legend()
     axes[0, 0].grid(True, alpha=0.3)
 
@@ -517,16 +525,16 @@ def main():
 
     # Fine-tuning parameters - CPU optimized
     # ENHANCED Fine-tuning parameters
-    TRAIN_TEST_SPLIT = 0.2  # 80% train, 20% test - more data for learning
-    EPOCHS = 15  # 3x more epochs for deeper learning
-    BATCH_SIZE = 16  # Larger batches if you have RAM (use 12 if OOM)
-    LEARNING_RATE = 5e-5  # Higher initial LR for faster convergence
-    MARGIN = 0.3
-    # TRAIN_TEST_SPLIT = 0.2  # 80% train, 20% test
-    # EPOCHS = 3
-    # BATCH_SIZE = 8  # Reduced for CPU efficiency
-    # LEARNING_RATE = 2e-5
-    # MARGIN = 0.5
+    # TRAIN_TEST_SPLIT = 0.2  # 80% train, 20% test - more data for learning
+    # EPOCHS = 15  # 3x more epochs for deeper learning
+    # BATCH_SIZE = 16  # Larger batches if you have RAM (use 12 if OOM)
+    # LEARNING_RATE = 5e-5  # Higher initial LR for faster convergence
+    # MARGIN = 0.3
+    TRAIN_TEST_SPLIT = 0.2  # 80% train, 20% test
+    EPOCHS = 3
+    BATCH_SIZE = 8  # Reduced for CPU efficiency
+    LEARNING_RATE = 2e-5
+    MARGIN = 0.5
 
     # Evaluation parameters
     USE_E5_FORMAT = "e5" in MODEL_NAME.lower()
