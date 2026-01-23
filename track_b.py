@@ -326,7 +326,8 @@ def fine_tune_model(model_name: str, train_data: List[InputExample],
     print(f"Best test accuracy: {best_test_accuracy:.4f}")
     print(f"Model saved to: {output_path}")
     print(f"{'='*60}")
-    plot_training_progress(history, output_path)
+    output_png="data"
+    plot_training_progress(history, output_png)
 
     return model
 
