@@ -18,6 +18,9 @@ from torch.optim import AdamW
 import json
 import random
 import traceback
+import matplotlib.pyplot as plt
+from sentence_transformers import losses
+
 
 
 def format_e5_input(texts: List[str], prefix: str = "passage: ") -> List[str]:
@@ -81,6 +84,92 @@ def prepare_training_data(track_a_path: str, track_b_path: str, test_size: float
     return train_data, test_data, df_labels
 
 
+def compute_test_loss(model: SentenceTransformer, test_data: List[InputExample],
+                      margin: float, batch_size: int = 32) -> float:
+    """Compute loss on test set."""
+    model.eval()
+    test_losses = []
+
+    with torch.no_grad():
+        for i in range(0, len(test_data), batch_size):
+            batch = test_data[i:i + batch_size]
+
+            anchors = [ex.texts[0] for ex in batch]
+            positives = [ex.texts[1] for ex in batch]
+            negatives = [ex.texts[2] for ex in batch]
+
+            anchor_embs = model.encode(anchors, convert_to_tensor=True,
+                                       normalize_embeddings=True, show_progress_bar=False)
+            pos_embs = model.encode(positives, convert_to_tensor=True,
+                                    normalize_embeddings=True, show_progress_bar=False)
+            neg_embs = model.encode(negatives, convert_to_tensor=True,
+                                    normalize_embeddings=True, show_progress_bar=False)
+
+            distance_pos = 1 - torch.sum(anchor_embs * pos_embs, dim=1)
+            distance_neg = 1 - torch.sum(anchor_embs * neg_embs, dim=1)
+
+            losses_triplet = torch.nn.functional.relu(distance_pos - distance_neg + margin)
+            test_losses.append(losses_triplet.mean().item())
+
+    model.train()
+    return np.mean(test_losses)
+
+
+def plot_training_progress(history: Dict, output_path: str):
+    """Create training progress plots."""
+    output_dir = Path(output_path).parent
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig.suptitle('Training Progress', fontsize=16, fontweight='bold')
+
+    # 1. Train vs Test Loss
+    axes[0, 0].plot(history['epoch'], history['train_loss'], 'b-o', label='Train Loss')
+    axes[0, 0].plot(history['epoch'], history['test_loss'], 'r-o', label='Test Loss')
+    axes[0, 0].set_xlabel('Epoch')
+    axes[0, 0].set_ylabel('Loss')
+    axes[0, 0].set_title('Train vs Test Loss')
+    axes[0, 0].legend()
+    axes[0, 0].grid(True, alpha=0.3)
+
+    # 2. Test Accuracy
+    axes[0, 1].plot(history['epoch'], [a * 100 for a in history['test_accuracy']], 'g-o')
+    axes[0, 1].set_xlabel('Epoch')
+    axes[0, 1].set_ylabel('Accuracy (%)')
+    axes[0, 1].set_title('Test Accuracy')
+    axes[0, 1].grid(True, alpha=0.3)
+
+    # 3. Batch Losses (with moving average)
+    batch_losses = history['batch_losses']
+    axes[1, 0].plot(batch_losses, 'b-', alpha=0.3, linewidth=0.5)
+    window = 50
+    if len(batch_losses) >= window:
+        moving_avg = np.convolve(batch_losses, np.ones(window) / window, mode='valid')
+        axes[1, 0].plot(range(window - 1, len(batch_losses)), moving_avg, 'r-', linewidth=2)
+    axes[1, 0].set_xlabel('Batch')
+    axes[1, 0].set_ylabel('Loss')
+    axes[1, 0].set_title('Batch Loss (with moving average)')
+    axes[1, 0].grid(True, alpha=0.3)
+
+    # 4. Loss Improvement
+    axes[1, 1].bar(['Initial', 'Final'],
+                   [history['train_loss'][0], history['train_loss'][-1]],
+                   color=['red', 'green'])
+    axes[1, 1].set_ylabel('Loss')
+    axes[1, 1].set_title('Loss Improvement')
+    axes[1, 1].grid(True, alpha=0.3, axis='y')
+
+    plt.tight_layout()
+    plot_file = output_dir / "training_progress.png"
+    plt.savefig(plot_file, dpi=300, bbox_inches='tight')
+    print(f"✓ Training plots saved to {plot_file}")
+    plt.close()
+
+    # Print summary
+    print(f"\n{'=' * 60}")
+    print(f"Loss: {history['train_loss'][0]:.4f} → {history['train_loss'][-1]:.4f} "
+          f"({(1 - history['train_loss'][-1] / history['train_loss'][0]) * 100:.1f}% improvement)")
+    print(f"Accuracy: {history['test_accuracy'][0] * 100:.1f}% → {history['test_accuracy'][-1] * 100:.1f}%")
+    print(f"{'=' * 60}")
 def fine_tune_model(model_name: str, train_data: List[InputExample],
                     test_data: List[InputExample], epochs: int = 3,
                     batch_size: int = 8,
@@ -119,7 +208,13 @@ def fine_tune_model(model_name: str, train_data: List[InputExample],
 
     # Create output directory
     os.makedirs(output_path, exist_ok=True)
-
+    history = {
+        'epoch': [],
+        'train_loss': [],
+        'test_loss': [],
+        'test_accuracy': [],
+        'batch_losses': []
+    }
     model.train()
     global_step = 0
     best_test_accuracy = 0.0
@@ -135,7 +230,7 @@ def fine_tune_model(model_name: str, train_data: List[InputExample],
 
         total_loss = 0
         progress_bar = tqdm(range(num_batches), desc=f"Training Epoch {epoch+1}")
-
+        epoch_losses = []  # ADD THIS
         for batch_idx in progress_bar:
             # Get batch manually (no DataLoader needed)
             start_idx = batch_idx * batch_size
@@ -146,6 +241,8 @@ def fine_tune_model(model_name: str, train_data: List[InputExample],
             anchors = [example.texts[0] for example in batch]
             positives = [example.texts[1] for example in batch]
             negatives = [example.texts[2] for example in batch]
+
+
 
             # Tokenize texts
             anchor_inputs = model.tokenize(anchors)
@@ -178,6 +275,10 @@ def fine_tune_model(model_name: str, train_data: List[InputExample],
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 
             optimizer.step()
+            # Batch Loss
+            batch_loss = loss_value.item()
+            epoch_losses.append(batch_loss)
+            history['batch_losses'].append(batch_loss)
 
             # Learning rate warmup
             if global_step < warmup_steps:
@@ -197,6 +298,11 @@ def fine_tune_model(model_name: str, train_data: List[InputExample],
         avg_loss = total_loss / num_batches
         print(f"Average loss: {avg_loss:.4f}")
 
+        avg_train_loss = np.mean(epoch_losses)
+        test_loss = compute_test_loss(model, test_data, margin, batch_size=32)
+
+
+        print(f"Train Loss: {avg_train_loss:.4f} | Test Loss: {test_loss:.4f}")
         # Evaluate on test set after each epoch
         print(f"\nEvaluating on test set...")
         test_accuracy = evaluate_on_test_set(model, test_data, batch_size=32)
@@ -209,12 +315,18 @@ def fine_tune_model(model_name: str, train_data: List[InputExample],
             print(f"✓ New best model saved (accuracy: {test_accuracy:.4f})")
         else:
             print(f"  (Best so far: {best_test_accuracy:.4f})")
+            # Save to history
+        history['epoch'].append(epoch + 1)
+        history['train_loss'].append(avg_train_loss)
+        history['test_loss'].append(test_loss)
+        history['test_accuracy'].append(test_accuracy)
 
     print(f"\n{'='*60}")
     print(f"Training complete!")
     print(f"Best test accuracy: {best_test_accuracy:.4f}")
     print(f"Model saved to: {output_path}")
     print(f"{'='*60}")
+    plot_training_progress(history, output_path)
 
     return model
 
@@ -259,6 +371,7 @@ def evaluate_on_test_set(model: SentenceTransformer, test_data: List[InputExampl
 
         correct = torch.sum(sims_pos > sims_neg).item()
         total = len(test_data)
+
 
     model.train()
     return correct / total
@@ -398,11 +511,16 @@ def main():
 
     # Fine-tuning parameters - CPU optimized
     # ENHANCED Fine-tuning parameters
-    TRAIN_TEST_SPLIT = 0.2  # 85% train, 15% test - more data for learning
-    EPOCHS = 12  # 3x more epochs for deeper learning
+    TRAIN_TEST_SPLIT = 0.2  # 80% train, 20% test - more data for learning
+    EPOCHS = 15  # 3x more epochs for deeper learning
     BATCH_SIZE = 16  # Larger batches if you have RAM (use 12 if OOM)
     LEARNING_RATE = 5e-5  # Higher initial LR for faster convergence
     MARGIN = 0.3
+    # TRAIN_TEST_SPLIT = 0.2  # 80% train, 20% test
+    # EPOCHS = 1
+    # BATCH_SIZE = 8  # Reduced for CPU efficiency
+    # LEARNING_RATE = 2e-5
+    # MARGIN = 0.5
 
     # Evaluation parameters
     USE_E5_FORMAT = "e5" in MODEL_NAME.lower()
@@ -535,7 +653,7 @@ def main():
         accuracy, results_df, metrics = evaluate_model(
             model, TRACK_A_PATH, embedding_lookup, margin=EVAL_MARGIN
         )
-
+        print(metrics)
         # Print detailed metrics
         print(f"\nFINE-TUNED MODEL RESULTS")
         print(f"{'='*60}")
