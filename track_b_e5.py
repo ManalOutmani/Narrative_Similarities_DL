@@ -35,7 +35,9 @@ def preprocess_text(text: str) -> str:
     return text
 
 
-def prepare_training_data(track_a_path: str, track_b_path: str, test_size: float = 0.2,
+def prepare_training_data(track_a_path: str,
+                          track_b_path: str,
+                          test_size: float = 0.2,
                          random_state: int = 42) -> Tuple:
     """
     Prepare training data from Track A labels and Track B texts.
@@ -59,14 +61,15 @@ def prepare_training_data(track_a_path: str, track_b_path: str, test_size: float
     train_examples = []
 
     for _, row in df_labels.iterrows():
-        anchor = row["anchor_text"]
+        # E5 prefixes
+        anchor = f"query: {row['anchor_text']}"
 
         if row["text_a_is_closer"]:
-            positive = row["text_a"]
-            negative = row["text_b"]
+            positive = f"passage: {row['text_a']}"
+            negative = f"passage: {row['text_b']}"
         else:
-            positive = row["text_b"]
-            negative = row["text_a"]
+            positive = f"passage: {row['text_b']}"
+            negative = f"passage: {row['text_a']}"
 
         # Create InputExample for SentenceTransformers
         train_examples.append(InputExample(texts=[anchor, positive, negative]))
@@ -124,72 +127,18 @@ def plot_training_progress(history: Dict, output_path: str):
 
     # 1. Train vs Test Loss
     # 4. Loss Margin (Difference between Train and Test Loss)
-
-    # --- Compute relative generalization gap ---
-    relative_gap = [
-        (test - train) / train
-        for test, train in zip(history['test_loss'], history['train_loss'])
-    ]
-
-    epochs = history['epoch']
-
-    # --- Smooth the signal (moving average) ---
-    window = 3
-    relative_gap_smooth = np.convolve(
-        relative_gap, np.ones(window) / window, mode='same'
-    )
-
-    # --- Define meaningful overfitting threshold (5%) ---
-    threshold = 0.05
-
-    # --- Plot ---
-    axes[0, 0].plot(
-        epochs,
-        relative_gap_smooth,
-        color='purple',
-        marker='o',
-        linewidth=2,
-        markersize=6,
-        label='Relative Generalization Gap'
-    )
-
-    # Zero reference
-    axes[0, 0].axhline(0, color='black', linestyle='--', alpha=0.5)
-
-    # Threshold reference
-    axes[0, 0].axhline(
-        threshold,
-        color='red',
-        linestyle=':',
-        alpha=0.7,
-        label='Overfitting Threshold (5%)'
-    )
-
-    # Fill areas
-    axes[0, 0].fill_between(
-        epochs,
-        0,
-        relative_gap_smooth,
-        where=[gap > threshold for gap in relative_gap_smooth],
-        alpha=0.3,
-        color='red',
-        label='Meaningful Overfitting'
-    )
-
-    axes[0, 0].fill_between(
-        epochs,
-        0,
-        relative_gap_smooth,
-        where=[gap <= threshold for gap in relative_gap_smooth],
-        alpha=0.3,
-        color='green',
-        label='Healthy Generalization'
-    )
-
-    # Labels
+    loss_gap = [test - train for test, train in zip(history['test_loss'], history['train_loss'])]
+    axes[0, 0].plot(history['epoch'], loss_gap, 'purple', marker='o', linewidth=2, markersize=6)
+    axes[0, 0].axhline(y=0, color='black', linestyle='--', alpha=0.5)
+    axes[0, 0].fill_between(history['epoch'], 0, loss_gap,
+                            where=[gap > 0 for gap in loss_gap],
+                            alpha=0.3, color='red', label='Overfitting')
+    axes[0, 0].fill_between(history['epoch'], 0, loss_gap,
+                            where=[gap <= 0 for gap in loss_gap],
+                            alpha=0.3, color='green', label='Underfitting')
     axes[0, 0].set_xlabel('Epoch')
-    axes[0, 0].set_ylabel('(Test − Train) / Train')
-    axes[0, 0].set_title('Generalization Gap (Relative & Smoothed)')
+    axes[0, 0].set_ylabel('Test Loss - Train Loss')
+    axes[0, 0].set_title('Overfitting Monitor (Generalization Gap)')
     axes[0, 0].legend()
     axes[0, 0].grid(True, alpha=0.3)
 
@@ -573,9 +522,18 @@ def main():
     # ============ CONFIGURATION ============
     MODE = "fine_tune"  # Options: "zero_shot", "fine_tune"
 
-    # Model selection - Consider using smaller models for CPU
-    MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"  # Faster on CPU (384-dim)
+
+    # MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"  # Faster on CPU (384-dim)
+    MODEL_NAME = "intfloat/e5-base-v2"  # changing the model
     # Alternative: "sentence-transformers/all-mpnet-base-v2" (768-dim, more accurate but slower)
+
+
+
+    TRAIN_TEST_SPLIT = 0.2
+    EPOCHS = 6  # Large models converge faster
+    BATCH_SIZE = 4  # Safer for GPU/VRAM
+    LEARNING_RATE = 1e-5  # Lower LR = more stable fine-tuning
+    MARGIN = 0.5
 
     # Fine-tuning parameters - CPU optimized
     # ENHANCED Fine-tuning parameters
@@ -584,11 +542,11 @@ def main():
     # BATCH_SIZE = 16  # Larger batches if you have RAM (use 12 if OOM)
     # LEARNING_RATE = 5e-5  # Higher initial LR for faster convergence
     # MARGIN = 0.3
-    TRAIN_TEST_SPLIT = 0.2  # 80% train, 20% test
-    EPOCHS = 3
-    BATCH_SIZE = 8  # Reduced for CPU efficiency
-    LEARNING_RATE = 2e-5
-    MARGIN = 0.5
+    # TRAIN_TEST_SPLIT = 0.2  # 80% train, 20% test
+    # EPOCHS = 3
+    # BATCH_SIZE = 8  # Reduced for CPU efficiency
+    # LEARNING_RATE = 2e-5
+    # MARGIN = 0.5
 
     # Evaluation parameters
     USE_E5_FORMAT = "e5" in MODEL_NAME.lower()
