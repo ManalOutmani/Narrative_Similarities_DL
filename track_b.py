@@ -242,6 +242,7 @@ def fine_tune_model(model_name: str, train_data: List[InputExample],
                     batch_size: int = 8,
                     learning_rate: float = 2e-5,
                     output_path: str = "output/fine_tuned_model",
+                    dropout_rate: float = 0.1,
                     margin: float = 0.5):
     """
     CPU-optimized fine-tuning using manual training loop WITHOUT DataLoader.
@@ -255,7 +256,14 @@ def fine_tune_model(model_name: str, train_data: List[InputExample],
     print(f"Using {torch.get_num_threads()} CPU threads")
 
     model = SentenceTransformer(model_name, device="cpu")
-
+    # Enable and configure dropout for regularization
+    print(f"\nConfiguring dropout regularization (rate: {dropout_rate})...")
+    dropout_layers_found = 0
+    for module in model.modules():
+        if isinstance(module, torch.nn.Dropout):
+            module.p = dropout_rate
+            dropout_layers_found += 1
+    print(f"  Configured {dropout_layers_found} dropout layers")
     # Setup optimizer
     optimizer = AdamW(model.parameters(), lr=learning_rate, weight_decay=0.01)
 
@@ -580,7 +588,7 @@ def main():
     # Fine-tuning parameters - CPU optimized
     # ENHANCED Fine-tuning parameters
     TRAIN_TEST_SPLIT = 0.2  # 80% train, 20% test - more data for learning
-    EPOCHS = 15  # 3x more epochs for deeper learning
+    EPOCHS = 10 # 3x more epochs for deeper learning
     BATCH_SIZE = 16  # Larger batches if you have RAM (use 12 if OOM)
     LEARNING_RATE = 5e-5  # Higher initial LR for faster convergence
     MARGIN = 0.3
