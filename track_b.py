@@ -242,7 +242,7 @@ def fine_tune_model(model_name: str, train_data: List[InputExample],
                     batch_size: int = 8,
                     learning_rate: float = 2e-5,
                     output_path: str = "output/fine_tuned_model",
-                    dropout_rate: float = 0.1,
+                    dropout_rate: float = 0.3,
                     margin: float = 0.5):
     """
     CPU-optimized fine-tuning using manual training loop WITHOUT DataLoader.
@@ -265,7 +265,7 @@ def fine_tune_model(model_name: str, train_data: List[InputExample],
             dropout_layers_found += 1
     print(f"  Configured {dropout_layers_found} dropout layers")
     # Setup optimizer
-    optimizer = AdamW(model.parameters(), lr=learning_rate, weight_decay=0.01)
+    optimizer = AdamW(model.parameters(), lr=learning_rate, weight_decay=0.1)
 
     # Calculate training steps
     num_batches = len(train_data) // batch_size
