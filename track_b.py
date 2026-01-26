@@ -20,7 +20,7 @@ import random
 import traceback
 import matplotlib.pyplot as plt
 from sentence_transformers import losses
-
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 
 def format_e5_input(texts: List[str], prefix: str = "passage: ") -> List[str]:
@@ -297,9 +297,14 @@ def fine_tune_model(model_name: str, train_data: List[InputExample],
     optimizer = AdamW(model.parameters(), lr=learning_rate, weight_decay=0.01)
 
     # Add scheduler
-    from torch.optim.lr_scheduler import ReduceLROnPlateau
-    scheduler = ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=1, verbose=True)
 
+    # scheduler = ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=1, verbose=True)
+    scheduler = ReduceLROnPlateau(
+        optimizer,
+        mode='max',
+        factor=0.5,
+        patience=1
+    )
     # Calculate training steps
     num_batches = len(train_data) // batch_size
     total_steps = num_batches * epochs
@@ -430,7 +435,13 @@ def fine_tune_model(model_name: str, train_data: List[InputExample],
         history['test_loss'].append(test_loss)
         history['test_accuracy'].append(test_accuracy)
         scheduler.step(test_accuracy)
-        best_test_accuracy = 0.0
+        old_lr = optimizer.param_groups[0]['lr']
+        # scheduler.step(test_accuracy)
+        new_lr = optimizer.param_groups[0]['lr']
+
+        if new_lr != old_lr:
+            print(f"📉 Learning rate reduced: {old_lr:.2e} → {new_lr:.2e}")
+        # best_test_accuracy = 0.0
         early_stopping = EarlyStopping(patience=2, min_delta=0.005)
         if early_stopping.early_stop:
             print(f"\n⚠ Early stopping triggered after epoch {epoch + 1}")
