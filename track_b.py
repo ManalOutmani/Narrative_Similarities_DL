@@ -257,7 +257,7 @@ def fine_tune_model(model_name: str, train_data: List[InputExample],
     model = SentenceTransformer(model_name, device="cpu")
 
     # Setup optimizer
-    optimizer = AdamW(model.parameters(), lr=learning_rate)
+    optimizer = AdamW(model.parameters(), lr=learning_rate, weight_decay=0.01)
 
     # Calculate training steps
     num_batches = len(train_data) // batch_size
