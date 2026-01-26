@@ -588,7 +588,7 @@ def main():
     # Fine-tuning parameters - CPU optimized
     # ENHANCED Fine-tuning parameters
     TRAIN_TEST_SPLIT = 0.3  # 80% train, 20% test - more data for learning
-    EPOCHS = 8 # 3x more epochs for deeper learning
+    EPOCHS = 4 # 3x more epochs for deeper learning
     BATCH_SIZE = 8  # Larger batches if you have RAM (use 12 if OOM)
     LEARNING_RATE = 2e-5  # Higher initial LR for faster convergence changing 5e-5 to 2e-5
     MARGIN = 0.5 # chainging 0.3 to 0.5
