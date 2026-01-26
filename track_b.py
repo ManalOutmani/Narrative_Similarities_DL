@@ -126,10 +126,14 @@ def plot_training_progress(history: Dict, output_path: str):
     # 4. Loss Margin (Difference between Train and Test Loss)
 
     # --- Compute relative generalization gap ---
+    #relative_gap = [
+       # (test - train) / train
+        #for test, train in zip(history['test_loss'], history['train_loss'])
+    #]
     relative_gap = [
-        (test - train) / train
+        (test - train)
         for test, train in zip(history['test_loss'], history['train_loss'])
-    ]
+        ]
 
     epochs = history['epoch']
 
@@ -140,7 +144,7 @@ def plot_training_progress(history: Dict, output_path: str):
     )
 
     # --- Define meaningful overfitting threshold (5%) ---
-    threshold = 0.05
+    threshold = 0.1# changing from 0.05 to 0.1
 
     # --- Plot ---
     axes[0, 0].plot(
@@ -192,6 +196,11 @@ def plot_training_progress(history: Dict, output_path: str):
     axes[0, 0].set_title('Generalization Gap (Relative & Smoothed)')
     axes[0, 0].legend()
     axes[0, 0].grid(True, alpha=0.3)
+    if len(history['epoch']) > 1:
+        z = np.polyfit(history['epoch'], [a * 100 for a in history['test_accuracy']], 1)
+        p = np.poly1d(z)
+        axes[0, 1].plot(history['epoch'], p(history['epoch']),
+                        "r--", alpha=0.5, label=f'Trend: {z[0]:+.2f}%/epoch')
 
     # 2. Test Accuracy
     axes[0, 1].plot(history['epoch'], [a * 100 for a in history['test_accuracy']], 'g-o')
@@ -237,6 +246,26 @@ def plot_training_progress(history: Dict, output_path: str):
           f"({(1 - history['train_loss'][-1] / history['train_loss'][0]) * 100:.1f}% improvement)")
     print(f"Accuracy: {history['test_accuracy'][0] * 100:.1f}% → {history['test_accuracy'][-1] * 100:.1f}%")
     print(f"{'=' * 60}")
+
+
+class EarlyStopping:
+    def __init__(self, patience=2, min_delta=0.005):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.counter = 0
+        self.best_score = None
+        self.early_stop = False
+
+    def __call__(self, val_score):
+        if self.best_score is None:
+            self.best_score = val_score
+        elif val_score < self.best_score + self.min_delta:
+            self.counter += 1
+            if self.counter >= self.patience:
+                self.early_stop = True
+        else:
+            self.best_score = val_score
+            self.counter = 0
 def fine_tune_model(model_name: str, train_data: List[InputExample],
                     test_data: List[InputExample], epochs: int = 3,
                     batch_size: int = 8,
@@ -265,7 +294,11 @@ def fine_tune_model(model_name: str, train_data: List[InputExample],
             dropout_layers_found += 1
     print(f"  Configured {dropout_layers_found} dropout layers")
     # Setup optimizer
-    optimizer = AdamW(model.parameters(), lr=learning_rate, weight_decay=0.1)
+    optimizer = AdamW(model.parameters(), lr=learning_rate, weight_decay=0.01)
+
+    # Add scheduler
+    from torch.optim.lr_scheduler import ReduceLROnPlateau
+    scheduler = ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=1, verbose=True)
 
     # Calculate training steps
     num_batches = len(train_data) // batch_size
@@ -355,6 +388,7 @@ def fine_tune_model(model_name: str, train_data: List[InputExample],
             epoch_losses.append(batch_loss)
             history['batch_losses'].append(batch_loss)
 
+
             # Learning rate warmup
             if global_step < warmup_steps:
                 lr_scale = float(global_step + 1) / float(max(1, warmup_steps))
@@ -395,6 +429,13 @@ def fine_tune_model(model_name: str, train_data: List[InputExample],
         history['train_loss'].append(avg_train_loss)
         history['test_loss'].append(test_loss)
         history['test_accuracy'].append(test_accuracy)
+        scheduler.step(test_accuracy)
+        best_test_accuracy = 0.0
+        early_stopping = EarlyStopping(patience=2, min_delta=0.005)
+        if early_stopping.early_stop:
+            print(f"\n⚠ Early stopping triggered after epoch {epoch + 1}")
+            break
+
 
     print(f"\n{'='*60}")
     print(f"Training complete!")
@@ -582,22 +623,29 @@ def main():
     MODE = "fine_tune"  # Options: "zero_shot", "fine_tune"
 
     # Model selection - Consider using smaller models for CPU
-    MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"  # Faster on CPU (384-dim)
+    MODEL_NAME = "sentence-transformers/all-MiniLM-L12-v2"
+        # "sentence-transformers/all-MiniLM-L6-v2"  # changing to a smaller modek
     # Alternative: "sentence-transformers/all-mpnet-base-v2" (768-dim, more accurate but slower)
 
     # Fine-tuning parameters - CPU optimized
     # ENHANCED Fine-tuning parameters
-    TRAIN_TEST_SPLIT = 0.3  # 80% train, 20% test - more data for learning
-    EPOCHS = 4 # 3x more epochs for deeper learning
-    BATCH_SIZE = 8  # Larger batches if you have RAM (use 12 if OOM)
-    LEARNING_RATE = 2e-5  # Higher initial LR for faster convergence changing 5e-5 to 2e-5
-    MARGIN = 0.5 # chainging 0.3 to 0.5
+    # TRAIN_TEST_SPLIT = 0.2  # 80% train, 20% test - more data for learning
+    # EPOCHS = 4 # 3x more epochs for deeper learning
+    # BATCH_SIZE = 8  # Larger batches if you have RAM (use 12 if OOM)
+    # LEARNING_RATE = 5e-5  # Higher initial LR for faster convergence changing 5e-5 to 2e-5
+    # MARGIN = 0.5 # chainging 0.3 to 0.5
     # TRAIN_TEST_SPLIT = 0.2  # 80% train, 20% test
     # EPOCHS = 3
     # BATCH_SIZE = 8  # Reduced for CPU efficiency
     # LEARNING_RATE = 2e-5
     # MARGIN = 0.5
-
+    # In fine_tune_model function
+    TRAIN_TEST_SPLIT = 0.15  # More training data
+    EPOCHS = 10
+    BATCH_SIZE = 8
+    LEARNING_RATE = 1e-5  # Much lower LR
+    MARGIN = 0.5
+    DROPOUT_RATE = 0.4
     # Evaluation parameters
     USE_E5_FORMAT = "e5" in MODEL_NAME.lower()
     EVAL_MARGIN = 0.0
