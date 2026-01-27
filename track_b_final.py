@@ -38,8 +38,9 @@ def preprocess_text(text: str) -> str:
     return text
 
 
-def prepare_training_data(synthetic_path: str, dev_track_a_path: str,
-                                   dev_track_b_path: str) -> List[InputExample]:
+def prepare_training_data(synthetic_path: str, dev_track_a_path: str
+                          #,dev_track_b_path: str
+                          ) -> List[InputExample]:
     """
     Load and combine synthetic training data with development data.
     All data used for training - no split.
@@ -86,10 +87,10 @@ def prepare_training_data(synthetic_path: str, dev_track_a_path: str,
     # 2. Load development data
     print(f"\n2. Loading development data:")
     print(f"   Track A: {dev_track_a_path}")
-    print(f"   Track B: {dev_track_b_path}")
+    #print(f"   Track B: {dev_track_b_path}")
 
     df_dev_labels = pd.read_json(dev_track_a_path, lines=True)
-    df_dev_texts = pd.read_json(dev_track_b_path, lines=True)
+    #df_dev_texts = pd.read_json(dev_track_b_path, lines=True)
 
     print(f"   Loaded {len(df_dev_labels)} development triples")
 
@@ -795,8 +796,8 @@ def main():
         # Load combined data (synthetic + dev)
         all_training_data = prepare_training_data(
             SYNTHETIC_TRAIN_PATH,
-            DEV_TRACK_A_PATH,
-            DEV_TRACK_B_PATH
+            DEV_TRACK_A_PATH
+            #,DEV_TRACK_B_PATH
         )
 
         print(f"Total combined data: {len(all_training_data)} examples")
@@ -909,6 +910,63 @@ def main():
 
         print(f"✓ Generated {len(test_embeddings)} test embeddings")
 
+        # ========== STEP 7: PREDICT LABELS FOR TEST TRACK A ==========
+        print("\n" + "=" * 60)
+        print("STEP 7: PREDICT LABELS FOR TEST TRACK A")
+        print("=" * 60)
+
+        # Load test Track A (unlabeled triples)
+        df_test_a = pd.read_json(TEST_TRACK_A_PATH, lines=True)
+        print(f"Loaded {len(df_test_a)} test triples from Track A")
+
+        # Preprocess texts
+        df_test_a["anchor_text"] = df_test_a["anchor_text"].apply(preprocess_text)
+        df_test_a["text_a"] = df_test_a["text_a"].apply(preprocess_text)
+        df_test_a["text_b"] = df_test_a["text_b"].apply(preprocess_text)
+
+        # Create embedding lookup for test data
+        test_embedding_lookup = dict(zip(data_b_test["text"], test_embeddings))
+
+        # Generate predictions
+        print("\nGenerating predictions...")
+        predictions = []
+
+        for idx, row in tqdm(df_test_a.iterrows(), total=len(df_test_a), desc="Predicting"):
+            anchor_text = row["anchor_text"]
+            text_a = row["text_a"]
+            text_b = row["text_b"]
+
+            # Get embeddings
+            anchor_emb = test_embedding_lookup.get(anchor_text)
+            a_emb = test_embedding_lookup.get(text_a)
+            b_emb = test_embedding_lookup.get(text_b)
+
+            # Check if all embeddings exist
+            if anchor_emb is None or a_emb is None or b_emb is None:
+                # If embeddings not found, encode on the fly
+                if anchor_emb is None:
+                    anchor_emb = model.encode(anchor_text, normalize_embeddings=True, convert_to_numpy=True)
+                if a_emb is None:
+                    a_emb = model.encode(text_a, normalize_embeddings=True, convert_to_numpy=True)
+                if b_emb is None:
+                    b_emb = model.encode(text_b, normalize_embeddings=True, convert_to_numpy=True)
+
+            # Calculate similarities
+            sim_a = cos_sim(anchor_emb, a_emb).item()
+            sim_b = cos_sim(anchor_emb, b_emb).item()
+
+            # Predict: text_a is closer if sim_a > sim_b
+            text_a_is_closer = sim_a > sim_b
+
+            predictions.append({
+                "anchor_text": row["anchor_text"],  # Keep original text
+                "text_a": row["text_a"],
+                "text_b": row["text_b"],
+                "text_a_is_closer": bool(text_a_is_closer)
+            })
+
+        print(f"✓ Generated {len(predictions)} predictions")
+
         # ========== STEP 7: SAVE EVERYTHING ==========
         print("\n" + "=" * 60)
         print("STEP 7: SAVING OUTPUTS")
@@ -925,6 +983,14 @@ def main():
         np.save(dev_output_file, dev_embeddings)
         print(f"✓ Development embeddings saved to {dev_output_file}")
         print(f"  Shape: {dev_embeddings.shape}")
+
+        # Save Track A predictions (test)
+        test_predictions_file = Path(OUTPUT_DIR) / "test_track_a_predictions.jsonl"
+        with open(test_predictions_file, 'w') as f:
+            for pred in predictions:
+                f.write(json.dumps(pred) + '\n')
+        print(f"✓ Test Track A predictions saved to {test_predictions_file}")
+        print(f"  Predictions: {len(predictions)}")
 
         # Save metadata
         metadata = {
