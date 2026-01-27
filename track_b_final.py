@@ -196,7 +196,13 @@ def compute_test_loss(model: SentenceTransformer, test_data: List[InputExample],
                                     normalize_embeddings=True, show_progress_bar=False)
             neg_embs = model.encode(negatives, convert_to_tensor=True,
                                     normalize_embeddings=True, show_progress_bar=False)
-
+            # Ensure embeddings are 2D
+            if anchor_embs.dim() == 1:
+                anchor_embs = anchor_embs.unsqueeze(0)
+            if pos_embs.dim() == 1:
+                pos_embs = pos_embs.unsqueeze(0)
+            if neg_embs.dim() == 1:
+                neg_embs = neg_embs.unsqueeze(0)
             distance_pos = 1 - torch.sum(anchor_embs * pos_embs, dim=1)
             distance_neg = 1 - torch.sum(anchor_embs * neg_embs, dim=1)
 
@@ -601,7 +607,13 @@ def evaluate_on_test_set(model: SentenceTransformer, test_data: List[InputExampl
             show_progress_bar=False,
             normalize_embeddings=True
         )
-
+        # Ensure embeddings are 2D (batch_size, embedding_dim)
+        if anchor_embs.dim() == 1:
+            anchor_embs = anchor_embs.unsqueeze(0)
+        if pos_embs.dim() == 1:
+            pos_embs = pos_embs.unsqueeze(0)
+        if neg_embs.dim() == 1:
+            neg_embs = neg_embs.unsqueeze(0)
         # Compute similarities
         sims_pos = torch.sum(anchor_embs * pos_embs, dim=1)
         sims_neg = torch.sum(anchor_embs * neg_embs, dim=1)
