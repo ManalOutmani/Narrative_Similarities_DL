@@ -375,8 +375,20 @@ def fine_tune_model(model_name: str, train_data: List[InputExample],
     # Set number of threads for CPU optimization
     torch.set_num_threads(os.cpu_count() or 4)
     print(f"Using {torch.get_num_threads()} CPU threads")
+    # Detect and use GPU if available
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"\nFine-tuning {model_name}...")
+    print(f"Using device: {device}")
 
-    model = SentenceTransformer(model_name, device="cpu")
+    if device == "cuda":
+        print(f"GPU: {torch.cuda.get_device_name(0)}")
+        print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1024 ** 3:.2f} GB")
+    else:
+        print("⚠ No GPU detected, using CPU")
+        torch.set_num_threads(os.cpu_count() or 4)
+        print(f"Using {torch.get_num_threads()} CPU threads")
+
+    model = SentenceTransformer(model_name, device=device)
     # Enable and configure dropout for regularization
     print(f"\nConfiguring dropout regularization (rate: {dropout_rate})...")
     dropout_layers_found = 0
@@ -802,7 +814,7 @@ def main():
         print("STEP 4: FINAL EVALUATION ON DEVELOPMENT SET")
         print("=" * 60)
 
-        # Load test Track B for final embeddings
+        # Load dev Track B for final embeddings
         data_b_dev = pd.read_json(DEV_TRACK_B_PATH, lines=True)
         data_b_dev["text"] = data_b_dev["text"].apply(preprocess_text)
         print(f"\nLoaded {len(data_b_dev)} test stories for embeddings")
