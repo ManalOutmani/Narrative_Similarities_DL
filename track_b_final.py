@@ -755,19 +755,23 @@ def main():
     MODE = "fine_tune"
     MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 
+    # Detect device
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
     # Fine-tuning parameters
     EPOCHS = 6
-    BATCH_SIZE = 8
+    BATCH_SIZE = 32 if device == "cuda" else 8  # Larger batch for GPU
     LEARNING_RATE = 5e-5
     MARGIN = 0.5
     DROPOUT_RATE = 0.2
+    TRAIN_TEST_SPLIT = 0.15  # 85% train, 15% validation
 
     # Paths
     SYNTHETIC_TRAIN_PATH = "data/synthetic_data_for_classification.jsonl"
-    DEV_TRACK_A_PATH = "data/dev_track_a.jsonl"  # Dev labels (for validation)
-    DEV_TRACK_B_PATH = "data/dev_track_b.jsonl"  # Dev texts (for embeddings)
-    TEST_TRACK_A_PATH = "data/test/test_track_a.jsonl"  # Test labels (if they exist)
-    TEST_TRACK_B_PATH = "data/test/test_track_b.jsonl"  # Test texts (for embeddings)
+    DEV_TRACK_A_PATH = "data/dev_track_a.jsonl"
+    DEV_TRACK_B_PATH = "data/dev_track_b.jsonl"
+    TEST_TRACK_A_PATH = "data/test/test_track_a.jsonl"
+    TEST_TRACK_B_PATH = "data/test/test_track_b.jsonl"
     OUTPUT_MODEL_PATH = "output/fine_tuned_model"
     OUTPUT_DIR = "output"
 
@@ -777,32 +781,41 @@ def main():
     print(f"TRAINING CONFIGURATION")
     print(f"{'=' * 60}")
     print(f"Model: {MODEL_NAME}")
-    print(f"Training: Synthetic data")
-    print(f"Validation: Development data")
-    print(f"Test: Generate embeddings")
+    print(f"Device: {device}")
+    print(f"Training: Synthetic + Development (combined, then split)")
+    print(f"Split: {int((1 - TRAIN_TEST_SPLIT) * 100)}% train / {int(TRAIN_TEST_SPLIT * 100)}% validation")
     print(f"{'=' * 60}")
 
     if MODE == "fine_tune":
+        # ========== STEP 1: LOAD AND COMBINE DATA ==========
         print(f"\n{'=' * 60}")
-        print("STEP 1: LOAD TRAINING DATA (SYNTHETIC)")
+        print("STEP 1: LOAD TRAINING DATA (SYNTHETIC + DEV)")
         print(f"{'=' * 60}")
 
-
-        # Create training examples
-        train_data = []
-        train_data = prepare_training_data(
+        # Load combined data (synthetic + dev)
+        all_training_data = prepare_training_data(
             SYNTHETIC_TRAIN_PATH,
             DEV_TRACK_A_PATH,
             DEV_TRACK_B_PATH
         )
-        # Load test data
-        test_data, df_test_labels = load_test_data(TEST_TRACK_A_PATH, TEST_TRACK_B_PATH)
 
+        print(f"Total combined data: {len(all_training_data)} examples")
 
+        # ========== STEP 2: SPLIT INTO TRAIN/VALIDATION ==========
         print(f"\n{'=' * 60}")
-        print(f"DATA SUMMARY:")
-        print(f"  Training:   {len(train_data)} examples (synthetic)")
-        print(f"  Validation: {len(test_data)} examples (development)")
+        print("STEP 2: SPLIT DATA INTO TRAIN/VALIDATION")
+        print(f"{'=' * 60}")
+
+        from sklearn.model_selection import train_test_split
+        train_data, validation_data = train_test_split(
+            all_training_data,
+            test_size=TRAIN_TEST_SPLIT,
+            random_state=42
+        )
+
+        print(f"Training set:   {len(train_data)} examples ({len(train_data) / len(all_training_data) * 100:.1f}%)")
+        print(
+            f"Validation set: {len(validation_data)} examples ({len(validation_data) / len(all_training_data) * 100:.1f}%)")
         print(f"{'=' * 60}")
 
         # ========== STEP 3: FINE-TUNE MODEL ==========
@@ -813,7 +826,7 @@ def main():
         model = fine_tune_model(
             MODEL_NAME,
             train_data,
-            test_data,
+            validation_data,  # Using validation split for monitoring
             epochs=EPOCHS,
             batch_size=BATCH_SIZE,
             learning_rate=LEARNING_RATE,
@@ -822,19 +835,19 @@ def main():
             margin=MARGIN
         )
 
-        # Load best model
+        # ========== STEP 4: LOAD BEST MODEL ==========
         print(f"\nLoading best fine-tuned model from {OUTPUT_MODEL_PATH}...")
-        model = SentenceTransformer(OUTPUT_MODEL_PATH, device="cpu")
+        model = SentenceTransformer(OUTPUT_MODEL_PATH, device=device)
 
-        # ========== STEP 4: FINAL EVALUATION ON DEVELOPMENT SET ==========
+        # ========== STEP 5: FINAL EVALUATION ON FULL DEV SET ==========
         print("\n" + "=" * 60)
-        print("STEP 4: FINAL EVALUATION ON DEVELOPMENT SET")
+        print("STEP 5: FINAL EVALUATION ON FULL DEVELOPMENT SET")
         print("=" * 60)
 
-        # Load dev Track B for final embeddings
+        # Load development Track B texts
         data_b_dev = pd.read_json(DEV_TRACK_B_PATH, lines=True)
         data_b_dev["text"] = data_b_dev["text"].apply(preprocess_text)
-        print(f"\nLoaded {len(data_b_dev)} test stories for embeddings")
+        print(f"Loaded {len(data_b_dev)} development texts")
 
         # Generate embeddings for development data
         print("\nGenerating embeddings for development data...")
@@ -847,16 +860,16 @@ def main():
             convert_to_numpy=True
         )
 
-        # Create embedding lookup for development data
+        # Create embedding lookup
         dev_embedding_lookup = dict(zip(data_b_dev["text"], dev_embeddings))
 
-        # Evaluate on development set using DEV_TRACK_A_PATH
+        # Evaluate on full development set
         dev_accuracy, dev_results_df, dev_metrics = evaluate_model(
             model, DEV_TRACK_A_PATH, dev_embedding_lookup, margin=0.0
         )
 
         # Print detailed results
-        print(f"\nFINAL DEVELOPMENT SET RESULTS")
+        print(f"\nFULL DEVELOPMENT SET RESULTS")
         print(f"{'=' * 60}")
         print(f"Accuracy:  {dev_accuracy:.4f} ({dev_accuracy * 100:.2f}%)")
         print(f"Precision: {dev_metrics['precision']:.4f}")
@@ -872,12 +885,12 @@ def main():
         print(f"  Median: {dev_metrics['median_confidence']:.4f}")
         print(f"{'=' * 60}")
 
-        # ========== STEP 5: GENERATE TEST EMBEDDINGS ==========
+        # ========== STEP 6: GENERATE TEST EMBEDDINGS (FOR SUBMISSION) ==========
         print("\n" + "=" * 60)
-        print("STEP 5: GENERATE TEST EMBEDDINGS (FOR SUBMISSION)")
+        print("STEP 6: GENERATE TEST EMBEDDINGS (FOR SUBMISSION)")
         print("=" * 60)
 
-        # Load test Track B for embeddings
+        # Load test Track B
         print(f"\nLoading test texts from {TEST_TRACK_B_PATH}...")
         data_b_test = pd.read_json(TEST_TRACK_B_PATH, lines=True)
         data_b_test["text"] = data_b_test["text"].apply(preprocess_text)
@@ -896,9 +909,9 @@ def main():
 
         print(f"✓ Generated {len(test_embeddings)} test embeddings")
 
-        # ========== STEP 6: SAVE EVERYTHING ==========
+        # ========== STEP 7: SAVE EVERYTHING ==========
         print("\n" + "=" * 60)
-        print("STEP 6: SAVING OUTPUTS")
+        print("STEP 7: SAVING OUTPUTS")
         print("=" * 60)
 
         # Save test embeddings
@@ -916,16 +929,28 @@ def main():
         # Save metadata
         metadata = {
             "model": MODEL_NAME,
-            "training_samples": len(train_data),
-            "validation_samples": len(test_data),
-            "dev_accuracy": float(dev_accuracy),
-            "dev_metrics": dev_metrics,
-            "test_embeddings_count": len(test_embeddings),
-            "dev_embeddings_count": len(dev_embeddings),
-            "epochs": EPOCHS,
-            "batch_size": BATCH_SIZE,
-            "learning_rate": LEARNING_RATE,
-            "margin": MARGIN,
+            "device": device,
+            "data_composition": {
+                "total_combined": len(all_training_data),
+                "training_split": len(train_data),
+                "validation_split": len(validation_data),
+                "split_ratio": TRAIN_TEST_SPLIT
+            },
+            "evaluation": {
+                "dev_accuracy": float(dev_accuracy),
+                "dev_metrics": dev_metrics
+            },
+            "training_config": {
+                "epochs": EPOCHS,
+                "batch_size": BATCH_SIZE,
+                "learning_rate": LEARNING_RATE,
+                "margin": MARGIN,
+                "dropout_rate": DROPOUT_RATE
+            },
+            "outputs": {
+                "test_embeddings_count": len(test_embeddings),
+                "dev_embeddings_count": len(dev_embeddings)
+            }
         }
 
         metadata_file = Path(OUTPUT_DIR) / "training_metadata.json"
@@ -934,16 +959,16 @@ def main():
         print(f"✓ Metadata saved to {metadata_file}")
 
         print(f"\n{'=' * 60}")
-        print("PIPELINE COMPLETE")
+        print("PIPELINE COMPLETE - SUMMARY")
         print(f"{'=' * 60}")
-        print(f"Training Data:   {len(train_data)} examples (synthetic)")
-        print(f"Validation Data: {len(test_data)} examples (development)")
-        print(f"Dev Accuracy:    {dev_accuracy * 100:.2f}%")
-        print(f"Test Embeddings: {len(test_embeddings)} generated")
+        print(f"Total Data:         {len(all_training_data)} examples")
+        print(f"Training Set:       {len(train_data)} examples")
+        print(f"Validation Set:     {len(validation_data)} examples")
+        print(f"Dev Accuracy:       {dev_accuracy * 100:.2f}%")
+        print(f"Test Embeddings:    {len(test_embeddings)} generated")
         print(f"{'=' * 60}")
 
         return dev_accuracy
-
 if __name__ == "__main__":
     try:
         import time
