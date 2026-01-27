@@ -359,7 +359,7 @@ class EarlyStopping:
             self.best_score = val_score
             self.counter = 0
 def fine_tune_model(model_name: str, train_data: List[InputExample],
-                    test_data: List[InputExample], epochs: int = 3,
+                    test_data: List[InputExample], epochs: int = 5,
                     batch_size: int = 8,
                     learning_rate: float = 2e-5,
                     output_path: str = "output/fine_tuned_model",
@@ -734,7 +734,7 @@ def main():
     DROPOUT_RATE = 0.2
 
     # Paths
-    SYNTHETIC_TRAIN_PATH = "synthetic_data_for_classification.jsonl"
+    SYNTHETIC_TRAIN_PATH = "data/synthetic_data_for_classification.jsonl"
     DEV_TRACK_A_PATH = "data/dev_track_a.jsonl"  # Dev labels (for validation)
     DEV_TRACK_B_PATH = "data/dev_track_b.jsonl"  # Dev texts (for embeddings)
     TEST_TRACK_A_PATH = "data/test/test_track_a.jsonl"  # Test labels (if they exist)
@@ -758,57 +758,17 @@ def main():
         print("STEP 1: LOAD TRAINING DATA (SYNTHETIC)")
         print(f"{'=' * 60}")
 
-        # Load synthetic data for TRAINING
-        df_synthetic = pd.read_json(SYNTHETIC_TRAIN_PATH, lines=True)
-        print(f"Loaded {len(df_synthetic)} synthetic triples")
-
-        # Filter and preprocess
-        df_synthetic = df_synthetic.dropna(subset=['anchor_text', 'text_a', 'text_b'])
-        df_synthetic["anchor_text"] = df_synthetic["anchor_text"].apply(preprocess_text)
-        df_synthetic["text_a"] = df_synthetic["text_a"].apply(preprocess_text)
-        df_synthetic["text_b"] = df_synthetic["text_b"].apply(preprocess_text)
 
         # Create training examples
         train_data = []
-        for _, row in df_synthetic.iterrows():
-            anchor = row["anchor_text"]
-            if row["text_a_is_closer"]:
-                positive = row["text_a"]
-                negative = row["text_b"]
-            else:
-                positive = row["text_b"]
-                negative = row["text_a"]
-            train_data.append(InputExample(texts=[anchor, positive, negative]))
+        train_data = prepare_training_data(
+            SYNTHETIC_TRAIN_PATH,
+            DEV_TRACK_A_PATH,
+            DEV_TRACK_B_PATH
+        )
+        # Load test data
+        test_data, df_test_labels = load_test_data(TEST_TRACK_A_PATH, TEST_TRACK_B_PATH)
 
-        print(f"✓ Created {len(train_data)} training examples")
-
-        # ========== STEP 2: LOAD VALIDATION DATA (DEVELOPMENT) ==========
-        print(f"\n{'=' * 60}")
-        print("STEP 2: LOAD VALIDATION DATA (DEVELOPMENT)")
-        print(f"{'=' * 60}")
-
-        df_dev_labels = pd.read_json(DEV_TRACK_A_PATH, lines=True)
-        print(f"Loaded {len(df_dev_labels)} development labels from {DEV_TRACK_A_PATH}")
-
-        # Filter and preprocess
-        df_dev_labels = df_dev_labels.dropna(subset=['anchor_text', 'text_a', 'text_b'])
-        df_dev_labels["anchor_text"] = df_dev_labels["anchor_text"].apply(preprocess_text)
-        df_dev_labels["text_a"] = df_dev_labels["text_a"].apply(preprocess_text)
-        df_dev_labels["text_b"] = df_dev_labels["text_b"].apply(preprocess_text)
-
-        # Create validation examples
-        test_data = []
-        for _, row in df_dev_labels.iterrows():
-            anchor = row["anchor_text"]
-            if row["text_a_is_closer"]:
-                positive = row["text_a"]
-                negative = row["text_b"]
-            else:
-                positive = row["text_b"]
-                negative = row["text_a"]
-            test_data.append(InputExample(texts=[anchor, positive, negative]))
-
-        print(f"✓ Created {len(test_data)} validation examples")
 
         print(f"\n{'=' * 60}")
         print(f"DATA SUMMARY:")
@@ -842,11 +802,10 @@ def main():
         print("STEP 4: FINAL EVALUATION ON DEVELOPMENT SET")
         print("=" * 60)
 
-        # Load development Track B for embeddings
-        print(f"\nLoading development texts from {DEV_TRACK_B_PATH}...")
+        # Load test Track B for final embeddings
         data_b_dev = pd.read_json(DEV_TRACK_B_PATH, lines=True)
         data_b_dev["text"] = data_b_dev["text"].apply(preprocess_text)
-        print(f"Loaded {len(data_b_dev)} development texts")
+        print(f"\nLoaded {len(data_b_dev)} test stories for embeddings")
 
         # Generate embeddings for development data
         print("\nGenerating embeddings for development data...")
