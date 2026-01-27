@@ -466,6 +466,11 @@ def fine_tune_model(model_name: str, train_data: List[InputExample],
             positive_inputs = model.tokenize(positives)
             negative_inputs = model.tokenize(negatives)
 
+            # Move tokenized inputs to GPU
+            anchor_inputs = {k: v.to(device) for k, v in anchor_inputs.items()}
+            positive_inputs = {k: v.to(device) for k, v in positive_inputs.items()}
+            negative_inputs = {k: v.to(device) for k, v in negative_inputs.items()}
+
             # Get embeddings through forward pass (maintains gradients)
             anchor_embeddings = model(anchor_inputs)['sentence_embedding']
             positive_embeddings = model(positive_inputs)['sentence_embedding']
